@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>병원 지도 API</title>
+    <link rel="stylesheet" href="css/style.css">
+    <script type="text/javascript" src="https://oapi.map.naver.com/openapi/v3/maps.js?ncpClientId=dwpb4prc61&amp;submodules=geocoder"></script>
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js" integrity="sha256-/JqT3SQfawRcv/BIHPThkBvs0OEvtFFmqPF/lYI/Cxo="crossorigin="anonymous"></script>
+</head>
+<body>
+    <div style="margin-top: 20px; margin-bottom: 10px; font-weight: bold;"> 위치정보</div>
+     
+    
+    <div id="map" style="width: 100%; height: 600px;"></div>
+
+    <script>
+        $(document).ready(async function(){
+            let XY = await getLocation();
+            alert("위도"+ XY.lat);
+            alert("경도"+ XY.lng);
+
+            //지도를 삽입할 HTML 요소 또는 HTML 요소의 id를 지정한다
+            var mapDiv = document.getElementById('map');
+            //옵션 없이 지도 객체를 생성하면 서울 시청을 중심으로 하는 16레벨의 지도가 생성된다
+            // var map = new naver.maps.Map(mapDiv);
+            var mapOptions = {
+                center:new naver.maps.LatLng(XY.lat, XY.lng),
+                zoom:17
+            };
+            var map = new naver.maps.Map(mapDiv, mapOptions);
+            //svar map = new naver.maps.Map(mapDiv);
+
+            
+            await naver.maps.Service.reverseGeocode({
+                //여기서 변환된 주소는 reverseGeocode()의 두번째 파라미터(function)로 받는다.
+                location: new naver.maps.LatLng(XY.lat, XY.lng)
+            }, function(status, response){
+                let result = response.result;
+                // result 하위 항목에서 주소를 꺼내기 위해서...
+                let items = result.items;
+                console.log(items[0].addrdetail.sido); //시도
+                console.log(items[0].addrdetail.sigugun); //시구군
+
+                
+                // 배열을 공백을 기준으로 분리해서 저장
+                let sido_arr = items[0].addrdetail.sido.split(" ");
+                let gugun_arr = items[0].addrdetail.sigugun.split(" ");
+                
+                let sido = "";
+                let gugun = "";
+                if(sido_arr.length == 1){
+                    sido = sido_arr[0];
+                    gugun = gugun_arr[0];
+                } else if(sido_arr.length > 1) {
+                    sido = sido_arr[0];
+                    gugun = sido_arr[1];
+                }
+                console.log(sido);
+                console.log(gugun);
+
+                //jQuery를 사용하여 /pharmach_list로 접속한다.
+                // ajax()의 파라미터가 여러개 이므로 중괄호 사용
+                $.ajax({
+                    url: "/pharmach_list",
+                    type: "GET",
+                    cache: false,
+                    dataType: "json",
+                    data: {"sidoCd" : sido, "sgguCd" : gugun, "yadmNm" : "", "pageNo" : "1", "numOfRows" : "500"},
+                    success: function(data){
+                        console.log(data);
+                    
+                        //item이 여러개이기 때문에 반복문 실행 
+                        data.items.item.forEach(function(it, index){
+                            let dutyName = it.dutyName; //이름
+                            let dutyAddr = it.dutyAddr; //주소
+                            let dutyTel1 = it.dutyTel1; //전화번호
+                            
+                            console.log(it.wgs84Lat, it.wgs84Lon);
+                            
+
+                            let cityhall = new naver.maps.LatLng(it.wgs84Lat, it.wgs84Lon);
+                            //마커생성
+                            let marker = new naver.maps.Marker({
+                                map: map,
+                                position: cityhall
+                            });
+                        
+                            //이 부분부터 붙여 넣기
+                            var contentString = [
+                                '<div class="iw_inner" style="padding: 0px 15px;">',
+                                '   <h3>'+dutyName+'</h3>',
+                                '   <p>'+dutyAddr,
+                                '   <button onclick="window.open(\'https://map.kakao.com/link/to/'+dutyName+','+it.wgs84Lat+','+it.wgs84Lon+'\');">카카오맵 연동</button>'+'<br />',
+                                '       '+dutyTel1+'<br />',
+                                '       '+dutyTime,
+                                '   </p>',
+                                '</div>'
+                            ].join('');
+                                
+                            var infowindow = new naver.maps.InfoWindow({
+                                content: contentString,
+                                maxWidth: 440,
+                                backgroundColor: "#eee",
+                                borderColor: "#666",
+                                borderWidth: 3,
+                                anchorSize: new naver.maps.Size(30, 30),
+                                anchorSkew: true,
+                                anchorColor: "#eee",
+                                pixelOffset: new naver.maps.Point(20, -20)
+                            });
+                        
+                            naver.maps.Event.addListener(marker, "click", function(e) {
+                                if (infowindow.getMap()) {
+                                    infowindow.close();
+                                } else {
+                                    infowindow.open(map, marker);
+                                }
+                            });
+                            //붙여 넣은 부분 끝
+                        });
+                    }, //success end
+                    error: function(request, status, error){
+                        console.error("Ajax Call Error: ", status, error);
+                    }
+                }); //$.ajax end
+            });
+        });
+
+        
+
+
+
+
+
+
+
+        
+
+        async function getLocation() {
+                //2개의 좌표를 반환해야 하기 때문에 object 형으로 반환 변수를 미리 선언
+                let XY = new Object();    
+                // navigator.geolocation 객체가 위치 정보를 가져오는 옮, 즉 위치 정보가 있으면 if문 실행
+                if(navigator.geolocation) {
+                    //resolve (정상실행), rejected(비정상실행)
+                    //Promise 는 비동기형을 동기형으로 만들 수 있는 객체로 선언함
+                    let promise = new Promise((resolve, rejected) =>{
+                        navigator.geolocation.getCurrentPosition((position) =>{
+                            //resolve()는 Promise의 첫번째 인자로 정ㅇ산적인 수행이 일어났을 때를 의미
+                            //즉, 정상적으로 작동되면 position 값(위도,경도)을 리턴
+                            resolve(position);
+                        });
+                    });
+                    //promise 는 위 함수 전체를 말한다 즉, promise가 끝날 때 까지 기다닐다 . : await
+                    let position = await promise;
+
+                    //navigator.geolocation.getCurrentPosition을 사용하면 위치를 알 수 있는데 그 인자로 함수 사용.
+                    //여기서 getCurrentPosition 메서드는 비동기 메서드 임
+                    // navigator.geolocation.getCurrentPosition(function(position){
+                        //position.coords.latitude //position 객체로 얻어진 위도
+                        //position.coords.longitude //position 객체로 얻어진 경도
+                        XY.lat = position.coords.latitude;
+                        XY.lng = position.coords.longitude;
+                        /* alert("위도"+ XY.lat);
+                        alert("경도"+ XY.lng); */
+                    // });
+                    return XY;
+                } else {
+                    console.error("Geolocation is not supported by this browser.");
+                    return { lat: 0, lng: 0 };  // 기본 위치를 제공할 수 있습니다.
+                }
+            }
+
+    </script>
+</body>
+</html>
